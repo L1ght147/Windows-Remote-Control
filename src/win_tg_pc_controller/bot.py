@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 from .actions import DANGEROUS_ACTIONS, run_control_action
-from .apps import LaunchApp, add_app, load_apps, run_app
+from .apps import LaunchApp, add_app, delete_app, load_apps, run_app
 from .clipboard import clear_clipboard, format_clipboard_text, get_clipboard_text, set_clipboard_text
 from .config import AppConfig, load_config
 from .i18n import DEFAULT_LANGUAGE, Language, is_supported_language, localize_text
@@ -138,7 +138,7 @@ def app_launch_menu(app_id: str) -> InlineKeyboardMarkup:
         [
             [_button("▶️ Запустить", f"confirm:app:run:{app_id}")],
             [_button("🛡 Запустить от администратора", f"confirm:app:run_admin:{app_id}")],
-            [_button("❌ Отмена", "cancel:menu:apps")],
+            [_button("\U0001f5d1 \u0423\u0434\u0430\u043b\u0438\u0442\u044c", f"app:delete:{app_id}")],
             [_button("⬅️ Назад", "menu:apps")],
         ]
     )
@@ -465,6 +465,10 @@ async def _handle_confirmation(
         terminate_process(pid)
         await _edit_or_reply(update, f"✅ Процесс PID {pid} завершен.", processes_menu())
         return
+    if action.startswith("app:delete:"):
+        app_id = action.removeprefix("app:delete:")
+        await _delete_confirmed_app(update, context, app_id)
+        return
     if action.startswith("app:run_admin:"):
         app_id = action.removeprefix("app:run_admin:")
         await _run_confirmed_app(update, context, app_id, as_admin=True)
@@ -495,6 +499,25 @@ async def _handle_app(
         )
         return
 
+    if data.startswith("app:delete:"):
+        app_id = data.removeprefix("app:delete:")
+        app = _apps(context).get(app_id)
+        if app is None:
+            await _edit_or_reply(update, "\u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430.", apps_menu(_apps(context)))
+            return
+        confirmations.request(update.callback_query.from_user.id, f"app:delete:{app.id}")
+        await _edit_or_reply(
+            update,
+            (
+                "\u26a0\ufe0f <b>\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0443 \u0438\u0437 \u0441\u043f\u0438\u0441\u043a\u0430?</b>\n"
+                f"<b>{escape(app.title)}</b>\n"
+                f"<pre>{escape(str(app.path))}</pre>\n"
+                "\u0424\u0430\u0439\u043b \u043d\u0430 \u0434\u0438\u0441\u043a\u0435 \u0443\u0434\u0430\u043b\u0435\u043d \u043d\u0435 \u0431\u0443\u0434\u0435\u0442."
+            ),
+            confirm_menu(f"app:delete:{app.id}", "menu:apps"),
+        )
+        return
+
     if data.startswith("app:run:"):
         app_id = data.removeprefix("app:run:")
         app = _apps(context).get(app_id)
@@ -514,6 +537,26 @@ async def _handle_app(
             ),
             app_launch_menu(app.id),
         )
+
+
+async def _delete_confirmed_app(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    app_id: str,
+) -> None:
+    config: AppConfig = context.application.bot_data["config"]
+    try:
+        app = delete_app(config.apps_file, app_id)
+    except ValueError:
+        context.application.bot_data["apps"] = load_apps(config.apps_file)
+        await _edit_or_reply(update, "\u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430.", apps_menu(_apps(context)))
+        return
+    context.application.bot_data["apps"] = load_apps(config.apps_file)
+    await _edit_or_reply(
+        update,
+        f"\u2705 \u0423\u0434\u0430\u043b\u0435\u043d\u043e \u0438\u0437 \u0441\u043f\u0438\u0441\u043a\u0430: <b>{escape(app.title)}</b>",
+        apps_menu(_apps(context)),
+    )
 
 
 async def _run_confirmed_app(

@@ -100,6 +100,15 @@ def add_app(path: Path, title: str, app_path: str) -> LaunchApp:
     return app
 
 
+def delete_app(path: Path, app_id: str) -> LaunchApp:
+    apps = load_apps(path)
+    app = apps.pop(app_id, None)
+    if app is None:
+        raise ValueError(f"Unknown app id: {app_id}")
+    save_apps(path, apps)
+    return app
+
+
 def _run_app_as_admin(app: LaunchApp) -> None:
     if platform.system() != "Windows":
         raise RuntimeError("admin launch is only supported on Windows")

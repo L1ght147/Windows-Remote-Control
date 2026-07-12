@@ -7,6 +7,7 @@ from win_tg_pc_controller.bot import (
     _edit_or_reply,
     _handle_screenshot,
     _localized_markup,
+    app_launch_menu,
     home_only_menu,
 )
 
@@ -17,6 +18,23 @@ def test_screenshot_home_button_is_localized() -> None:
     button = menu.inline_keyboard[0][0]
     assert button.text == "\U0001f3e0 Main menu"
     assert button.callback_data == "menu:main"
+
+
+def test_app_menu_has_localized_delete_button() -> None:
+    menu = _localized_markup("en", app_launch_menu("tool"))
+
+    button = next(
+        button
+        for row in menu.inline_keyboard
+        for button in row
+        if button.callback_data == "app:delete:tool"
+    )
+    assert button.text == "\U0001f5d1 Delete"
+    assert all(
+        button.callback_data != "cancel:menu:apps"
+        for row in menu.inline_keyboard
+        for button in row
+    )
 
 
 def test_screenshot_reply_has_home_button(monkeypatch) -> None:
