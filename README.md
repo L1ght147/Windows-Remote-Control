@@ -105,6 +105,10 @@ The package also exposes a console script when installed as a Python package:
 win-tg-pc-controller
 ```
 
+## Language
+
+On the first `/start`, the bot asks you to choose Russian or English. The choice is saved locally in `user_settings.json` and remains active after a restart. Send `/language` at any time to choose a different language.
+
 ## Autostart after Windows logon
 
 For reliable remote reboot recovery, use Windows AutoLogon together with the

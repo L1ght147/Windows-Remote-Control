@@ -3,6 +3,8 @@ from __future__ import annotations
 import platform
 from types import ModuleType
 
+from .i18n import Language, t
+
 
 MAX_CLIPBOARD_DISPLAY = 3500
 
@@ -56,9 +58,9 @@ def clear_clipboard() -> None:
     set_clipboard_text("")
 
 
-def format_clipboard_text(text: str) -> str:
+def format_clipboard_text(text: str, language: Language) -> str:
     if not text:
-        return "Clipboard is empty or does not contain text."
+        return t(language, "clipboard.empty")
     if len(text) > MAX_CLIPBOARD_DISPLAY:
         return text[:MAX_CLIPBOARD_DISPLAY] + "\n... clipboard text truncated ..."
     return text

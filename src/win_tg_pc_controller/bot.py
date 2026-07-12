@@ -19,6 +19,8 @@ from .actions import DANGEROUS_ACTIONS, run_control_action
 from .apps import LaunchApp, add_app, load_apps, run_app
 from .clipboard import clear_clipboard, format_clipboard_text, get_clipboard_text, set_clipboard_text
 from .config import AppConfig, load_config
+from .i18n import DEFAULT_LANGUAGE, Language, is_supported_language, localize_text
+from .language_store import LanguageStore
 from .processes import ProcessCandidate, describe_process, get_foreground_process, search_processes, terminate_process
 from .screenshot import capture_screenshot_png, list_monitors
 from .security import ConfirmationStore, is_allowed_user
@@ -28,6 +30,43 @@ from .status import collect_status, format_status
 LOGGER = logging.getLogger(__name__)
 INPUT_STATE_KEY = "input_state"
 PROCESS_RESULTS_KEY = "process_results"
+LANGUAGE_STORE: LanguageStore | None = None
+
+
+def _language_store() -> LanguageStore:
+    if LANGUAGE_STORE is None:
+        raise RuntimeError("language store is not initialized")
+    return LANGUAGE_STORE
+
+
+def _stored_language(user_id: int | None) -> Language | None:
+    if user_id is None:
+        return None
+    return _language_store().get(user_id)
+
+
+def _language(update: Update) -> Language:
+    return _stored_language(_user_id(update)) or DEFAULT_LANGUAGE
+
+
+def _localized_markup(language: Language, reply_markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+    if reply_markup is None or language == "ru":
+        return reply_markup
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(localize_text(language, button.text), callback_data=button.callback_data)
+                for button in row
+            ]
+            for row in reply_markup.inline_keyboard
+        ]
+    )
+
+
+def language_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[_button("Русский", "language:ru"), _button("English", "language:en")]]
+    )
 
 
 def _button(text: str, data: str) -> InlineKeyboardButton:
@@ -150,6 +189,9 @@ def _allowed(update: Update, config: AppConfig) -> bool:
 
 
 async def _edit_or_reply(update: Update, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    language = _language(update)
+    text = localize_text(language, text)
+    reply_markup = _localized_markup(language, reply_markup)
     query = update.callback_query
     if query is not None and query.message is not None:
         try:
@@ -164,6 +206,9 @@ async def _edit_or_reply(update: Update, text: str, reply_markup: InlineKeyboard
 
 
 async def _reply(update: Update, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    language = _language(update)
+    text = localize_text(language, text)
+    reply_markup = _localized_markup(language, reply_markup)
     if update.effective_message is not None:
         await update.effective_message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
@@ -172,19 +217,40 @@ async def _show_main(update: Update) -> None:
     await _edit_or_reply(update, "🖥 <b>Windows Telegram PC Controller</b>", main_menu())
 
 
+async def _show_language_selection(update: Update) -> None:
+    await _edit_or_reply(update, "🌐 <b>Выберите язык / Choose a language</b>", language_menu())
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config: AppConfig = context.application.bot_data["config"]
     if not _allowed(update, config):
         await _reject(update)
         return
     context.user_data.pop(INPUT_STATE_KEY, None)
+    if _stored_language(_user_id(update)) is None:
+        await _show_language_selection(update)
+        return
     await _show_main(update)
+
+
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    config: AppConfig = context.application.bot_data["config"]
+    if not _allowed(update, config):
+        await _reject(update)
+        return
+    context.user_data.pop(INPUT_STATE_KEY, None)
+    context.application.bot_data["confirmations"].cancel(_user_id(update))
+    await _show_language_selection(update)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config: AppConfig = context.application.bot_data["config"]
     if not _allowed(update, config):
         await _reject(update)
+        return
+
+    if _stored_language(_user_id(update)) is None:
+        await _show_language_selection(update)
         return
 
     state = context.user_data.get(INPUT_STATE_KEY)
@@ -265,6 +331,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await query.answer()
     data = query.data or ""
+    if data.startswith("language:"):
+        selected_language = data.removeprefix("language:")
+        if not is_supported_language(selected_language):
+            await _show_language_selection(update)
+            return
+        _language_store().set(query.from_user.id, selected_language)
+        context.user_data.pop(INPUT_STATE_KEY, None)
+        confirmations.cancel(query.from_user.id)
+        await _show_main(update)
+        return
+    if _stored_language(_user_id(update)) is None:
+        await _show_language_selection(update)
+        return
+
     try:
         if data == "menu:main":
             context.user_data.pop(INPUT_STATE_KEY, None)
@@ -492,7 +572,7 @@ async def _handle_clipboard(
     data: str,
 ) -> None:
     if data == "clipboard:show":
-        text = format_clipboard_text(get_clipboard_text())
+        text = format_clipboard_text(get_clipboard_text(), _language(update))
         await _edit_or_reply(
             update,
             f"📋 <b>Буфер обмена</b>\n<pre>{escape(text)}</pre>",
@@ -541,10 +621,14 @@ def build_application(config: AppConfig) -> Application:
         .pool_timeout(config.telegram_timeout_seconds)
         .build()
     )
+    global LANGUAGE_STORE
+    LANGUAGE_STORE = LanguageStore(config.user_settings_file)
     app.bot_data["config"] = config
+    app.bot_data["language_store"] = LANGUAGE_STORE
     app.bot_data["confirmations"] = ConfirmationStore(config.confirmation_ttl_seconds)
     app.bot_data["apps"] = apps
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("language", language))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_error_handler(handle_error)

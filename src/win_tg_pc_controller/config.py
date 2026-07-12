@@ -13,6 +13,7 @@ class AppConfig:
     telegram_bot_token: str
     allowed_user_id: int
     apps_file: Path
+    user_settings_file: Path
     confirmation_ttl_seconds: int = 30
     telegram_timeout_seconds: float = 30.0
     telegram_bootstrap_retries: int = -1
@@ -59,6 +60,7 @@ def load_config(config_path: str | Path = "config.json") -> AppConfig:
     apps_file = Path(str(raw.get("apps_file", "apps.json")))
     if not apps_file.is_absolute():
         apps_file = path.parent / apps_file
+    user_settings_file = path.parent / "user_settings.json"
 
     confirmation_ttl = _int_value(
         "confirmation_ttl_seconds", raw.get("confirmation_ttl_seconds", 30)
@@ -81,6 +83,7 @@ def load_config(config_path: str | Path = "config.json") -> AppConfig:
         telegram_bot_token=token,
         allowed_user_id=_int_value("allowed_user_id", allowed_user_id),
         apps_file=apps_file,
+        user_settings_file=user_settings_file,
         confirmation_ttl_seconds=confirmation_ttl,
         telegram_timeout_seconds=telegram_timeout,
         telegram_bootstrap_retries=telegram_bootstrap_retries,
