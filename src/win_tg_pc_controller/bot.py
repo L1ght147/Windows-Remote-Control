@@ -91,6 +91,10 @@ def back_only_menu(parent: str = "menu:main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[_button("⬅️ Назад", parent)]])
 
 
+def home_only_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[_button("\U0001f3e0 \u0413\u043b\u0430\u0432\u043d\u043e\u0435 \u043c\u0435\u043d\u044e", "menu:main")]])
+
+
 def controls_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -194,6 +198,9 @@ async def _edit_or_reply(update: Update, text: str, reply_markup: InlineKeyboard
     reply_markup = _localized_markup(language, reply_markup)
     query = update.callback_query
     if query is not None and query.message is not None:
+        if query.message.text is None:
+            await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            return
         try:
             await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             return
@@ -362,7 +369,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         elif data == "menu:clipboard":
             await _edit_or_reply(update, "📋 <b>Буфер обмена</b>", clipboard_menu())
         elif data.startswith("shot:"):
-            await _handle_screenshot(query, data.removeprefix("shot:"))
+            await _handle_screenshot(update, query, data.removeprefix("shot:"))
         elif data.startswith("action:"):
             await _handle_action(update, query, confirmations, _user_id(update), data.removeprefix("action:"))
         elif data.startswith("confirm:"):
@@ -412,9 +419,13 @@ async def _route_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, targ
         await _show_main(update)
 
 
-async def _handle_screenshot(query, monitor_id_text: str) -> None:
+async def _handle_screenshot(update: Update, query, monitor_id_text: str) -> None:
     monitor_id = int(monitor_id_text)
-    await query.message.reply_photo(photo=capture_screenshot_png(monitor_id))
+    reply_markup = _localized_markup(_language(update), home_only_menu())
+    await query.message.reply_photo(
+        photo=capture_screenshot_png(monitor_id),
+        reply_markup=reply_markup,
+    )
 
 
 async def _handle_action(update: Update, query, confirmations: ConfirmationStore, user_id: int | None, action: str) -> None:
