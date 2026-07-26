@@ -10,4 +10,5 @@ def test_format_clipboard_text_truncates_long_text() -> None:
     formatted = format_clipboard_text(text, "en")
 
     assert len(formatted) < len(text)
+    assert len(formatted) <= MAX_CLIPBOARD_DISPLAY
     assert "truncated" in formatted

@@ -7,6 +7,7 @@ from .i18n import Language, t
 
 
 MAX_CLIPBOARD_DISPLAY = 3500
+TRUNCATION_NOTICE = "\n... clipboard text truncated ..."
 
 
 def _require_windows() -> None:
@@ -62,5 +63,5 @@ def format_clipboard_text(text: str, language: Language) -> str:
     if not text:
         return t(language, "clipboard.empty")
     if len(text) > MAX_CLIPBOARD_DISPLAY:
-        return text[:MAX_CLIPBOARD_DISPLAY] + "\n... clipboard text truncated ..."
+        return text[: MAX_CLIPBOARD_DISPLAY - len(TRUNCATION_NOTICE)] + TRUNCATION_NOTICE
     return text

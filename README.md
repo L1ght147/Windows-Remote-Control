@@ -15,6 +15,8 @@ desktop session isolation.
   and Windows session diagnostics.
 - Capture screenshots from a selected monitor when the bot runs in the active
   user session and the desktop is accessible.
+- Send a short online notification when the bot starts and optionally send
+  screenshots from one selected monitor on a temporary timer.
 - Lock, sleep, reboot, and shut down the PC.
 - Require confirmation for sleep, reboot, shutdown, process termination,
   clipboard clearing, and application launch.
@@ -126,6 +128,10 @@ The script creates a scheduled task named `WindowsTelegramPCControllerUser`.
 The task starts the bot after Windows logs into the current user and doesn't
 request elevated administrator privileges.
 
+After the bot starts successfully, it sends the allowed Telegram user a short
+online notification. This confirms the bot has started; it can also appear
+after a manual bot-process restart, not only after Windows starts.
+
 Remove the scheduled task with:
 
 ```bat
@@ -199,6 +205,12 @@ error, check:
 If screenshots, clipboard operations, foreground-process detection, or
 application launch fail, confirm that the bot is running in the logged-in user
 session and that the desktop isn't locked.
+
+To enable automatic screenshots, open **Скриншот** → **Автоскриншот**, choose a
+monitor, and send an interval from 1 to 1440 whole minutes. The first screenshot
+is sent immediately, then at that interval. Only one timer can be active; it is
+stopped when the bot or PC restarts. If a timed screenshot cannot be captured,
+the bot reports the error once and stops the timer.
 
 ## Development
 

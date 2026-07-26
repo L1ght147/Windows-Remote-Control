@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, NetworkError, TimedOut
+from telegram.error import BadRequest, NetworkError, TelegramError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -19,10 +20,11 @@ from .actions import DANGEROUS_ACTIONS, run_control_action
 from .apps import LaunchApp, add_app, delete_app, load_apps, run_app
 from .clipboard import clear_clipboard, format_clipboard_text, get_clipboard_text, set_clipboard_text
 from .config import AppConfig, load_config
-from .i18n import DEFAULT_LANGUAGE, Language, is_supported_language, localize_text
+from .i18n import DEFAULT_LANGUAGE, Language, is_supported_language, localize_text, t
 from .language_store import LanguageStore
 from .processes import ProcessCandidate, describe_process, get_foreground_process, search_processes, terminate_process
 from .screenshot import capture_screenshot_png, list_monitors
+from .screenshot_timer import ScreenshotSchedule, ScreenshotTimer, validate_interval_minutes
 from .security import ConfirmationStore, is_allowed_user
 from .status import collect_status, format_status
 
@@ -30,6 +32,7 @@ from .status import collect_status, format_status
 LOGGER = logging.getLogger(__name__)
 INPUT_STATE_KEY = "input_state"
 PROCESS_RESULTS_KEY = "process_results"
+SCREENSHOT_TIMER_KEY = "screenshot_timer"
 LANGUAGE_STORE: LanguageStore | None = None
 
 
@@ -122,7 +125,28 @@ def screenshot_menu() -> InlineKeyboardMarkup:
         else:
             text = f"📺 Монитор {monitor.id}: {monitor.width}x{monitor.height}"
         rows.append([_button(text, f"shot:{monitor.id}")])
+    rows.append([_button("⏱ Автоскриншот", "timer:menu")])
     rows.append([_button("⬅️ Назад", "menu:main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def screenshot_timer_menu(schedule: ScreenshotSchedule | None) -> InlineKeyboardMarkup:
+    rows = [[_button("▶️ Настроить", "timer:start")]]
+    if schedule is not None:
+        rows.append([_button("⏹ Остановить", "timer:stop")])
+    rows.append([_button("⬅️ Назад", "menu:screenshot")])
+    return InlineKeyboardMarkup(rows)
+
+
+def screenshot_timer_monitor_menu() -> InlineKeyboardMarkup:
+    rows = []
+    for monitor in list_monitors():
+        if monitor.is_all:
+            text = f"🖼 Все мониторы ({monitor.width}x{monitor.height})"
+        else:
+            text = f"📺 Монитор {monitor.id}: {monitor.width}x{monitor.height}"
+        rows.append([_button(text, f"timer:monitor:{monitor.id}")])
+    rows.append([_button("⬅️ Назад", "timer:menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -323,6 +347,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 clipboard_menu(),
             )
 
+    if state["type"] == "screenshot_timer_interval":
+        try:
+            interval_minutes = validate_interval_minutes(text)
+        except ValueError:
+            await _reply(
+                update,
+                t(_language(update), "timer.invalid_interval"),
+                InlineKeyboardMarkup([[_button("❌ Отмена", "cancel:timer:menu")]]),
+            )
+            return
+        schedule = _screenshot_timer(context).start(state["monitor_id"], interval_minutes)
+        context.user_data.pop(INPUT_STATE_KEY, None)
+        await _reply(
+            update,
+            t(
+                _language(update),
+                "timer.started",
+                monitor_id=schedule.monitor_id,
+                minutes=schedule.interval_minutes,
+            ),
+            screenshot_timer_menu(schedule),
+        )
+
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config: AppConfig = context.application.bot_data["config"]
@@ -368,6 +415,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await _edit_or_reply(update, "🛑 <b>Завершить процесс</b>", processes_menu())
         elif data == "menu:clipboard":
             await _edit_or_reply(update, "📋 <b>Буфер обмена</b>", clipboard_menu())
+        elif data.startswith("timer:"):
+            await _handle_screenshot_timer(update, context, data)
         elif data.startswith("shot:"):
             await _handle_screenshot(update, query, data.removeprefix("shot:"))
         elif data.startswith("action:"):
@@ -398,6 +447,10 @@ def _apps(context: ContextTypes.DEFAULT_TYPE) -> dict[str, LaunchApp]:
     return context.application.bot_data["apps"]
 
 
+def _screenshot_timer(context: ContextTypes.DEFAULT_TYPE) -> ScreenshotTimer:
+    return context.application.bot_data[SCREENSHOT_TIMER_KEY]
+
+
 async def _show_apps(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     apps = _apps(context)
     text = "🚀 <b>Запуск программ</b>"
@@ -415,6 +468,8 @@ async def _route_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, targ
         await _edit_or_reply(update, "⚙️ <b>Управление ПК</b>", controls_menu())
     elif target == "menu:clipboard":
         await _edit_or_reply(update, "📋 <b>Буфер обмена</b>", clipboard_menu())
+    elif target == "timer:menu":
+        await _show_screenshot_timer(update, context)
     else:
         await _show_main(update)
 
@@ -426,6 +481,62 @@ async def _handle_screenshot(update: Update, query, monitor_id_text: str) -> Non
         photo=capture_screenshot_png(monitor_id),
         reply_markup=reply_markup,
     )
+
+
+async def _show_screenshot_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    schedule = _screenshot_timer(context).schedule
+    language = _language(update)
+    if schedule is None:
+        status = t(language, "timer.inactive")
+    else:
+        status = t(
+            language,
+            "timer.active",
+            monitor_id=schedule.monitor_id,
+            minutes=schedule.interval_minutes,
+        )
+    await _edit_or_reply(
+        update,
+        f"{t(language, 'timer.title')}\n{status}",
+        screenshot_timer_menu(schedule),
+    )
+
+
+async def _handle_screenshot_timer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    data: str,
+) -> None:
+    if data == "timer:menu":
+        await _show_screenshot_timer(update, context)
+        return
+    if data == "timer:start":
+        await _edit_or_reply(
+            update,
+            t(_language(update), "timer.select_monitor"),
+            screenshot_timer_monitor_menu(),
+        )
+        return
+    if data == "timer:stop":
+        _screenshot_timer(context).stop()
+        context.user_data.pop(INPUT_STATE_KEY, None)
+        await _edit_or_reply(
+            update,
+            t(_language(update), "timer.stopped"),
+            screenshot_timer_menu(None),
+        )
+        return
+    if data.startswith("timer:monitor:"):
+        monitor_id = int(data.removeprefix("timer:monitor:"))
+        context.user_data[INPUT_STATE_KEY] = {
+            "type": "screenshot_timer_interval",
+            "monitor_id": monitor_id,
+        }
+        await _edit_or_reply(
+            update,
+            t(_language(update), "timer.enter_interval"),
+            InlineKeyboardMarkup([[_button("❌ Отмена", "cancel:timer:menu")]]),
+        )
 
 
 async def _handle_action(update: Update, query, confirmations: ConfirmationStore, user_id: int | None, action: str) -> None:
@@ -664,6 +775,48 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
     LOGGER.exception("Unhandled bot error", exc_info=error)
 
 
+async def notify_online(application: Application) -> None:
+    config: AppConfig = application.bot_data["config"]
+    language = _stored_language(config.allowed_user_id) or DEFAULT_LANGUAGE
+    await application.bot.send_message(
+        chat_id=config.allowed_user_id,
+        text=t(language, "startup.online"),
+    )
+
+
+async def start_polling(application: Application, config: AppConfig) -> None:
+    if application.updater is None:
+        raise RuntimeError("Telegram updater is not configured")
+
+    def error_callback(exc: TelegramError) -> None:
+        application.create_task(application.process_error(error=exc, update=None))
+
+    await application.initialize()
+    await application.updater.start_polling(
+        allowed_updates=Update.ALL_TYPES,
+        bootstrap_retries=config.telegram_bootstrap_retries,
+        timeout=int(config.telegram_timeout_seconds),
+        error_callback=error_callback,
+    )
+    await application.start()
+    await notify_online(application)
+
+
+async def run_polling(application: Application, config: AppConfig) -> None:
+    try:
+        await start_polling(application, config)
+        await asyncio.Event().wait()
+    finally:
+        timer: ScreenshotTimer | None = application.bot_data.get(SCREENSHOT_TIMER_KEY)
+        if timer is not None:
+            timer.stop()
+        if application.updater is not None and application.updater.running:
+            await application.updater.stop()
+        if application.running:
+            await application.stop()
+        await application.shutdown()
+
+
 def build_application(config: AppConfig) -> Application:
     apps = load_apps(config.apps_file)
     app = (
@@ -681,6 +834,22 @@ def build_application(config: AppConfig) -> Application:
     app.bot_data["language_store"] = LANGUAGE_STORE
     app.bot_data["confirmations"] = ConfirmationStore(config.confirmation_ttl_seconds)
     app.bot_data["apps"] = apps
+
+    async def send_timed_screenshot(monitor_id: int) -> None:
+        await app.bot.send_photo(
+            chat_id=config.allowed_user_id,
+            photo=capture_screenshot_png(monitor_id),
+        )
+
+    async def report_timer_failure(exc: Exception) -> None:
+        language = _stored_language(config.allowed_user_id) or DEFAULT_LANGUAGE
+        LOGGER.warning("Auto-screenshot timer stopped: %s", exc)
+        await app.bot.send_message(
+            chat_id=config.allowed_user_id,
+            text=t(language, "timer.failed"),
+        )
+
+    app.bot_data[SCREENSHOT_TIMER_KEY] = ScreenshotTimer(send_timed_screenshot, report_timer_failure)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language))
     app.add_handler(CallbackQueryHandler(handle_callback))
@@ -700,11 +869,7 @@ def run() -> None:
     app = build_application(config)
     LOGGER.info("Starting Windows Telegram PC Controller")
     try:
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            bootstrap_retries=config.telegram_bootstrap_retries,
-            timeout=int(config.telegram_timeout_seconds),
-        )
+        asyncio.run(run_polling(app, config))
     except TimedOut:
         LOGGER.error(
             "Telegram API timed out. Check internet access to https://api.telegram.org, "
