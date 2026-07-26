@@ -49,11 +49,22 @@ machine through the exposed actions.
 
 ## Requirements
 
-- Windows.
-- Python 3.11 or newer.
-- A Telegram bot token from BotFather.
-- Your numeric Telegram user ID.
-- Network access to `https://api.telegram.org`.
+- Windows with an interactive user session.
+- Python 3.11 or newer. Download it from the [official Windows installer][python-windows]
+  and enable **Add python.exe to PATH** during installation. Verify it with:
+
+  ```bat
+  python --version
+  ```
+
+- `pip`, which is included with the official Python installer. The installation
+  script creates the virtual environment and installs all Python dependencies.
+- A Telegram bot token from BotFather and your numeric Telegram user ID.
+- Network access to `https://api.telegram.org` to install dependencies and run
+  the bot.
+
+Git is required only when cloning this repository from GitHub. If needed,
+install [Git for Windows][git-windows].
 
 Most runtime features require an interactive Windows user session. Screenshots,
 clipboard access, foreground-window detection, and application launch can fail
@@ -61,6 +72,13 @@ when Windows is locked, UAC secure desktop is active, or the bot runs in a
 different session from the active console.
 
 ## Installation
+
+If you have not downloaded the project yet, clone the repository first:
+
+```powershell
+git clone https://github.com/L1ght147/Windows-Remote-Control.git
+cd Windows-Remote-Control
+```
 
 For a standard Windows setup, run the installer script from the repository root:
 
@@ -85,6 +103,12 @@ ALLOWED_USER_ID=123456789
 
 `ALLOWED_USER_ID` can also be set in `config.json`, but the environment variable
 takes precedence.
+
+Before the first launch, confirm that:
+
+1. `python --version` reports Python 3.11 or newer.
+2. `install.bat` completed without errors.
+3. `.env` contains a real BotFather token and your numeric Telegram user ID.
 
 ## Run the bot
 
@@ -233,3 +257,5 @@ confirmation handling, process safeguards, status formatting, clipboard text
 formatting, and Windows session diagnostics.
 
 [autologon]: https://learn.microsoft.com/en-us/sysinternals/downloads/autologon
+[git-windows]: https://git-scm.com/download/win
+[python-windows]: https://www.python.org/downloads/windows/
