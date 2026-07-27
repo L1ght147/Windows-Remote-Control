@@ -3,19 +3,13 @@ setlocal EnableExtensions DisableDelayedExpansion
 
 set "TASK_NAME=WindowsTelegramPCControllerUser"
 set "PROJECT_DIR=%~dp0"
-set "PYTHON_EXE=%PROJECT_DIR%.venv\Scripts\python.exe"
-
-if /I "%~1"=="--run" (
-    cd /d "%PROJECT_DIR%"
-    set "PYTHONPATH=%PROJECT_DIR%src"
-    "%PYTHON_EXE%" -m win_tg_pc_controller
-    exit /b %ERRORLEVEL%
-)
+set "PYTHONW_EXE=%PROJECT_DIR%.venv\Scripts\pythonw.exe"
+set "LAUNCHER=%PROJECT_DIR%run_autostart.pyw"
 
 echo Installing Windows Telegram PC Controller user autostart...
 echo.
 
-if not exist "%PYTHON_EXE%" (
+if not exist "%PYTHONW_EXE%" (
     echo ERROR: Virtual environment was not found.
     echo Run install.bat first.
     pause
@@ -36,7 +30,7 @@ if not exist "%PROJECT_DIR%config.json" (
     exit /b 1
 )
 
-schtasks /Create /TN "%TASK_NAME%" /SC ONLOGON /F /TR "%ComSpec% /d /c call ^"%PROJECT_DIR%install_user_autostart.bat^" --run"
+schtasks /Create /TN "%TASK_NAME%" /SC ONLOGON /F /TR "\"%PYTHONW_EXE%\" \"%LAUNCHER%\""
 set "CREATE_ERROR=%ERRORLEVEL%"
 
 if not "%CREATE_ERROR%"=="0" (

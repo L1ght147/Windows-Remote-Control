@@ -150,7 +150,9 @@ user-logon scheduled task.
 
 The script creates a scheduled task named `WindowsTelegramPCControllerUser`.
 The task starts the bot after Windows logs into the current user and doesn't
-request elevated administrator privileges.
+request elevated administrator privileges. It runs the bot in the background
+without opening a Command Prompt window. Use `start.bat` when you want a
+visible console for manual startup and diagnostics.
 
 After the bot starts successfully, it sends the allowed Telegram user a short
 online notification. This confirms the bot has started; it can also appear
