@@ -2,6 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 import win_tg_pc_controller.bot as bot_module
 from win_tg_pc_controller.config import AppConfig
 from win_tg_pc_controller.bot import (
@@ -40,20 +42,42 @@ def test_app_menu_has_localized_delete_button() -> None:
     )
 
 
-def test_screenshot_reply_has_home_button(monkeypatch) -> None:
-    message = SimpleNamespace(reply_photo=AsyncMock())
+def test_screenshot_replaces_monitor_menu_with_home_button(monkeypatch) -> None:
+    message = SimpleNamespace(chat_id=123, delete=AsyncMock())
     query = SimpleNamespace(message=message)
     update = SimpleNamespace()
+    context = SimpleNamespace(bot=SimpleNamespace(send_photo=AsyncMock()))
     monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
     monkeypatch.setattr(bot_module, "capture_screenshot_png", lambda _monitor_id: b"png")
 
-    asyncio.run(_handle_screenshot(update, query, "1"))
+    asyncio.run(_handle_screenshot(update, context, query, "1"))
 
-    arguments = message.reply_photo.await_args.kwargs
+    arguments = context.bot.send_photo.await_args.kwargs
+    assert arguments["chat_id"] == 123
     button = arguments["reply_markup"].inline_keyboard[0][0]
     assert arguments["photo"] == b"png"
     assert button.text == "\U0001f3e0 Main menu"
     assert button.callback_data == "menu:main"
+    message.delete.assert_awaited_once()
+
+
+def test_screenshot_capture_failure_keeps_monitor_menu(monkeypatch) -> None:
+    message = SimpleNamespace(chat_id=123, delete=AsyncMock())
+    query = SimpleNamespace(message=message)
+    update = SimpleNamespace()
+    context = SimpleNamespace(bot=SimpleNamespace(send_photo=AsyncMock()))
+    monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
+    monkeypatch.setattr(
+        bot_module,
+        "capture_screenshot_png",
+        lambda _monitor_id: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        asyncio.run(_handle_screenshot(update, context, query, "1"))
+
+    context.bot.send_photo.assert_not_awaited()
+    message.delete.assert_not_awaited()
 
 
 def test_screenshot_menu_includes_auto_screenshot_button(monkeypatch) -> None:

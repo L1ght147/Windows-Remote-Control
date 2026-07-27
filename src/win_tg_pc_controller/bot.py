@@ -418,7 +418,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         elif data.startswith("timer:"):
             await _handle_screenshot_timer(update, context, data)
         elif data.startswith("shot:"):
-            await _handle_screenshot(update, query, data.removeprefix("shot:"))
+            await _handle_screenshot(update, context, query, data.removeprefix("shot:"))
         elif data.startswith("action:"):
             await _handle_action(update, query, confirmations, _user_id(update), data.removeprefix("action:"))
         elif data.startswith("confirm:"):
@@ -474,13 +474,21 @@ async def _route_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, targ
         await _show_main(update)
 
 
-async def _handle_screenshot(update: Update, query, monitor_id_text: str) -> None:
+async def _handle_screenshot(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    query,
+    monitor_id_text: str,
+) -> None:
     monitor_id = int(monitor_id_text)
     reply_markup = _localized_markup(_language(update), home_only_menu())
-    await query.message.reply_photo(
-        photo=capture_screenshot_png(monitor_id),
+    screenshot = capture_screenshot_png(monitor_id)
+    await context.bot.send_photo(
+        chat_id=query.message.chat_id,
+        photo=screenshot,
         reply_markup=reply_markup,
     )
+    await query.message.delete()
 
 
 async def _show_screenshot_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
