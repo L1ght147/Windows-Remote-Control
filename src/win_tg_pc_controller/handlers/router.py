@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from ..i18n import Language, LocalizedError, is_supported_language, t
 from ..status import collect_status, format_status
-from . import apps, clipboard, controls, processes, screenshots
+from . import apps, clipboard, controls, power, processes, screenshots
 from .common import (
     INPUT_STATE_KEY,
     back_only_menu,
@@ -79,6 +79,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await clipboard.handle_set_input(update, context, language, text)
     elif state_type == "screenshot_timer_interval":
         await screenshots.handle_timer_interval_input(update, context, language, state, text)
+    elif state_type == "power_timer_minutes":
+        await power.handle_minutes_input(update, context, language, state, text)
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -144,6 +146,8 @@ async def _route_callback(
         await clipboard.show_clipboard(update, language)
     elif data.startswith("timer:"):
         await screenshots.handle_screenshot_timer(update, context, language, data)
+    elif data.startswith("ptimer:"):
+        await power.handle_power_timer(update, context, language, data)
     elif data.startswith("shot:"):
         await screenshots.handle_screenshot(update, context, language, data.removeprefix("shot:"))
     elif data.startswith("action:"):
@@ -189,6 +193,8 @@ async def _route_cancel(
         await clipboard.show_clipboard(update, language)
     elif target == "timer:menu":
         await screenshots.show_screenshot_timer(update, context, language)
+    elif target == "ptimer:menu":
+        await power.show_power_timer(update, context, language)
     else:
         await show_main(update, language)
 
@@ -216,6 +222,8 @@ async def _handle_confirmation(
         await apps.run_confirmed_app(update, context, language, action.removeprefix("app:run_admin:"), as_admin=True)
     elif action.startswith("app:run:"):
         await apps.run_confirmed_app(update, context, language, action.removeprefix("app:run:"), as_admin=False)
+    elif action.startswith("ptimer:start:"):
+        await power.start_confirmed_timer(update, context, language, action)
     elif action == "clipboard:clear":
         await clipboard.clear_confirmed_clipboard(update, language)
     else:

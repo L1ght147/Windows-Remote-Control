@@ -17,12 +17,15 @@ from telegram.ext import (
     filters,
 )
 
+from .actions import run_control_action
 from .apps import LaunchApp, load_apps
 from .config import AppConfig, load_config
-from .handlers.common import LANGUAGE_STORE_KEY, SCREENSHOT_TIMER_KEY, language_store_of
+from .handlers.common import LANGUAGE_STORE_KEY, POWER_TIMER_KEY, SCREENSHOT_TIMER_KEY, language_store_of
+from .handlers.power import action_name, warning_menu
 from .handlers.router import handle_callback, handle_text, language_command, start
 from .i18n import DEFAULT_LANGUAGE, Language, t
 from .language_store import LanguageStore
+from .power_timer import PowerSchedule, PowerTimer
 from .screenshot import capture_screenshot
 from .screenshot_timer import ScreenshotTimer
 from .security import ConfirmationStore
@@ -111,6 +114,9 @@ async def run_polling(application: Application, config: AppConfig) -> None:
         timer: ScreenshotTimer | None = application.bot_data.get(SCREENSHOT_TIMER_KEY)
         if timer is not None:
             timer.stop()
+        power_timer: PowerTimer | None = application.bot_data.get(POWER_TIMER_KEY)
+        if power_timer is not None:
+            power_timer.cancel()
         if application.updater is not None and application.updater.running:
             await application.updater.stop()
         if application.running:
@@ -160,6 +166,28 @@ def build_application(config: AppConfig) -> Application:
         )
 
     app.bot_data[SCREENSHOT_TIMER_KEY] = ScreenshotTimer(send_timed_screenshot, report_timer_failure)
+
+    async def run_timed_action(action: str) -> None:
+        LOGGER.info("Power timer fired: %s", action)
+        await asyncio.to_thread(run_control_action, action)
+
+    async def warn_power_timer(schedule: PowerSchedule) -> None:
+        language = _owner_language(app)
+        await app.bot.send_message(
+            chat_id=config.allowed_user_id,
+            text=t(language, "power.warning", action=action_name(language, schedule.action)),
+            reply_markup=warning_menu(language),
+        )
+
+    async def report_power_timer_failure(schedule: PowerSchedule, exc: Exception) -> None:
+        LOGGER.warning("Power timer action %s failed: %s", schedule.action, exc)
+        language = _owner_language(app)
+        await app.bot.send_message(
+            chat_id=config.allowed_user_id,
+            text=t(language, "power.failed", action=action_name(language, schedule.action)),
+        )
+
+    app.bot_data[POWER_TIMER_KEY] = PowerTimer(run_timed_action, warn_power_timer, report_power_timer_failure)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CallbackQueryHandler(handle_callback))

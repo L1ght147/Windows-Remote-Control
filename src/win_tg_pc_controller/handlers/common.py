@@ -14,6 +14,7 @@ from ..security import ConfirmationStore, is_allowed_user
 INPUT_STATE_KEY = "input_state"
 PROCESS_RESULTS_KEY = "process_results"
 SCREENSHOT_TIMER_KEY = "screenshot_timer"
+POWER_TIMER_KEY = "power_timer"
 LANGUAGE_STORE_KEY = "language_store"
 
 

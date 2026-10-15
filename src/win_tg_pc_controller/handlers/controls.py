@@ -15,6 +15,7 @@ def controls_menu(language: Language) -> InlineKeyboardMarkup:
         [
             [button(t(language, "menu.lock"), "action:lock"), button(t(language, "menu.sleep"), "action:sleep")],
             [button(t(language, "menu.reboot"), "action:reboot"), button(t(language, "menu.shutdown"), "action:shutdown")],
+            [button(t(language, "menu.power_timer"), "ptimer:menu")],
             [button(t(language, "menu.back"), "menu:main")],
         ]
     )

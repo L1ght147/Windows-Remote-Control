@@ -18,6 +18,9 @@ desktop session isolation.
 - Send a short online notification when the bot starts and optionally send
   screenshots from one selected monitor on a temporary timer.
 - Lock, sleep, reboot, and shut down the PC.
+- Schedule a shutdown or sleep in 1 to 1440 minutes, get a warning one minute
+  before it fires, and cancel it from Telegram. The timer lives in the bot
+  process, so it is lost if the bot stops.
 - Require confirmation for sleep, reboot, shutdown, process termination,
   clipboard clearing, and application launch.
 - Restrict all bot commands to the configured `ALLOWED_USER_ID`.
