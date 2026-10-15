@@ -54,3 +54,49 @@ def test_terminate_process_converts_access_denied(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(RuntimeError, match="access denied while terminating process"):
         processes_module.terminate_process(123)
+
+
+def test_terminate_process_refuses_reused_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    terminated: list[int] = []
+
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def create_time(self) -> float:
+            return 200.0
+
+        def terminate(self) -> None:
+            terminated.append(self.pid)
+
+    monkeypatch.setattr(processes_module, "can_terminate_process", lambda pid: (True, None))
+    monkeypatch.setattr(processes_module.psutil, "Process", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="process has changed"):
+        processes_module.terminate_process(123, expected_create_time=100.0)
+
+    assert terminated == []
+
+
+def test_terminate_process_kills_matching_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    terminated: list[int] = []
+
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def create_time(self) -> float:
+            return 100.0
+
+        def terminate(self) -> None:
+            terminated.append(self.pid)
+
+        def wait(self, timeout: float) -> None:
+            return None
+
+    monkeypatch.setattr(processes_module, "can_terminate_process", lambda pid: (True, None))
+    monkeypatch.setattr(processes_module.psutil, "Process", FakeProcess)
+
+    processes_module.terminate_process(123, expected_create_time=100.0)
+
+    assert terminated == [123]

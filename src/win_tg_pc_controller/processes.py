@@ -14,6 +14,7 @@ class ProcessCandidate:
     name: str
     exe: str
     cmdline: str
+    create_time: float | None = None
 
 
 DENIED_PIDS = {0, 4}
@@ -33,7 +34,7 @@ def search_processes(query: str, limit: int = 10) -> list[ProcessCandidate]:
         return []
 
     matches: list[ProcessCandidate] = []
-    for process in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
+    for process in psutil.process_iter(["pid", "name", "exe", "cmdline", "create_time"]):
         try:
             info = process.info
             name = str(info.get("name") or "")
@@ -51,6 +52,7 @@ def search_processes(query: str, limit: int = 10) -> list[ProcessCandidate]:
                 name=name or "unknown",
                 exe=exe,
                 cmdline=cmdline,
+                create_time=info.get("create_time"),
             )
         )
         if len(matches) >= limit:
@@ -99,7 +101,11 @@ def process_candidate_from_pid(pid: int) -> ProcessCandidate:
         cmdline = _safe_join_cmdline(process.cmdline())
     except (psutil.AccessDenied, psutil.NoSuchProcess):
         cmdline = ""
-    return ProcessCandidate(pid=pid, name=name or "unknown", exe=exe, cmdline=cmdline)
+    try:
+        create_time: float | None = process.create_time()
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        create_time = None
+    return ProcessCandidate(pid=pid, name=name or "unknown", exe=exe, cmdline=cmdline, create_time=create_time)
 
 
 def get_foreground_process() -> ProcessCandidate:
@@ -119,12 +125,19 @@ def get_foreground_process() -> ProcessCandidate:
     return process_candidate_from_pid(process_id)
 
 
-def terminate_process(pid: int, timeout_seconds: float = 3.0) -> None:
+def terminate_process(
+    pid: int,
+    expected_create_time: float | None = None,
+    timeout_seconds: float = 3.0,
+) -> None:
     allowed, reason = can_terminate_process(pid)
     if not allowed:
         raise RuntimeError(reason or "process cannot be terminated")
     try:
         process = psutil.Process(pid)
+        # The PID may have been reused by another process since it was selected.
+        if expected_create_time is not None and process.create_time() != expected_create_time:
+            raise RuntimeError("process has changed since it was selected")
         process.terminate()
         process.wait(timeout=timeout_seconds)
     except psutil.TimeoutExpired:

@@ -9,6 +9,7 @@ from telegram.error import InvalidToken, NetworkError
 import win_tg_pc_controller.bot as bot_module
 from win_tg_pc_controller.apps import LaunchApp
 from win_tg_pc_controller.config import AppConfig
+from win_tg_pc_controller.processes import ProcessCandidate
 from win_tg_pc_controller.bot import (
     _edit_or_reply,
     _handle_screenshot,
@@ -51,7 +52,7 @@ def test_screenshot_replaces_monitor_menu_with_home_button(monkeypatch) -> None:
     update = SimpleNamespace()
     context = SimpleNamespace(bot=SimpleNamespace(send_photo=AsyncMock()))
     monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
-    monkeypatch.setattr(bot_module, "capture_screenshot_png", lambda _monitor_id: b"png")
+    monkeypatch.setattr(bot_module, "capture_screenshot", lambda _monitor_id: b"png")
 
     asyncio.run(_handle_screenshot(update, context, query, "1"))
 
@@ -72,7 +73,7 @@ def test_screenshot_capture_failure_keeps_monitor_menu(monkeypatch) -> None:
     monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
     monkeypatch.setattr(
         bot_module,
-        "capture_screenshot_png",
+        "capture_screenshot",
         lambda _monitor_id: (_ for _ in ()).throw(RuntimeError("unavailable")),
     )
 
@@ -274,3 +275,18 @@ def test_setup_logging_writes_to_file(tmp_path) -> None:
             handler.close()
         root.handlers = previous_handlers
         root.setLevel(previous_level)
+
+
+def test_kill_action_round_trips_process_identity() -> None:
+    candidate = ProcessCandidate(pid=4321, name="tool.exe", exe="", cmdline="", create_time=1712345678.123456)
+
+    action = bot_module._kill_action(candidate)
+
+    assert len(f"confirm:{action}".encode()) <= 64
+    assert bot_module._parse_kill_action(action) == (4321, 1712345678.123456)
+
+
+def test_kill_action_without_create_time() -> None:
+    candidate = ProcessCandidate(pid=4321, name="tool.exe", exe="", cmdline="")
+
+    assert bot_module._parse_kill_action(bot_module._kill_action(candidate)) == (4321, None)

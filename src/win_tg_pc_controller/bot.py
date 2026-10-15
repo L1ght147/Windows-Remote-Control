@@ -26,7 +26,7 @@ from .config import AppConfig, load_config
 from .i18n import DEFAULT_LANGUAGE, Language, is_supported_language, localize_text, t
 from .language_store import LanguageStore
 from .processes import ProcessCandidate, describe_process, get_foreground_process, search_processes, terminate_process
-from .screenshot import capture_screenshot_png, list_monitors
+from .screenshot import capture_screenshot, list_monitors
 from .screenshot_timer import ScreenshotSchedule, ScreenshotTimer, validate_interval_minutes
 from .security import ConfirmationStore, is_allowed_user
 from .status import collect_status, format_status
@@ -333,7 +333,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if state["type"] == "process_search":
-        results = search_processes(text)
+        results = await asyncio.to_thread(search_processes, text)
         context.user_data.pop(INPUT_STATE_KEY, None)
         context.user_data[PROCESS_RESULTS_KEY] = {candidate.pid: candidate for candidate in results}
         if not results:
@@ -357,6 +357,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"❌ Буфер обмена недоступен: {escape(str(exc))}",
                 clipboard_menu(),
             )
+        return
 
     if state["type"] == "screenshot_timer_interval":
         try:
@@ -415,7 +416,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data.pop(INPUT_STATE_KEY, None)
             await _show_main(update)
         elif data == "menu:status":
-            await _edit_or_reply(update, f"🖥 <b>Статус ПК</b>\n<pre>{escape(format_status(collect_status()))}</pre>", back_only_menu())
+            status = await asyncio.to_thread(collect_status)
+            await _edit_or_reply(update, f"🖥 <b>Статус ПК</b>\n<pre>{escape(format_status(status))}</pre>", back_only_menu())
         elif data == "menu:screenshot":
             await _edit_or_reply(update, "📸 <b>Выбери монитор для скриншота</b>", screenshot_menu())
         elif data == "menu:controls":
@@ -493,7 +495,7 @@ async def _handle_screenshot(
 ) -> None:
     monitor_id = int(monitor_id_text)
     reply_markup = _localized_markup(_language(update), home_only_menu())
-    screenshot = capture_screenshot_png(monitor_id)
+    screenshot = await asyncio.to_thread(capture_screenshot, monitor_id)
     await context.bot.send_photo(
         chat_id=query.message.chat_id,
         photo=screenshot,
@@ -591,8 +593,8 @@ async def _handle_confirmation(
         await _edit_or_reply(update, f"✅ Выполнено: {escape(control_action)}", main_menu())
         return
     if action.startswith("proc:kill:"):
-        pid = int(action.removeprefix("proc:kill:"))
-        terminate_process(pid)
+        pid, create_time = _parse_kill_action(action)
+        await asyncio.to_thread(terminate_process, pid, create_time)
         await _edit_or_reply(update, f"✅ Процесс PID {pid} завершен.", processes_menu())
         return
     if action.startswith("app:delete:"):
@@ -709,6 +711,16 @@ async def _run_confirmed_app(
     )
 
 
+def _kill_action(candidate: ProcessCandidate) -> str:
+    create_time = "" if candidate.create_time is None else repr(candidate.create_time)
+    return f"proc:kill:{candidate.pid}:{create_time}"
+
+
+def _parse_kill_action(action: str) -> tuple[int, float | None]:
+    pid_text, _, create_time_text = action.removeprefix("proc:kill:").partition(":")
+    return int(pid_text), float(create_time_text) if create_time_text else None
+
+
 async def _handle_process(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -717,11 +729,12 @@ async def _handle_process(
 ) -> None:
     if data == "proc:foreground":
         candidate = get_foreground_process()
-        confirmations.request(update.callback_query.from_user.id, f"proc:kill:{candidate.pid}")
+        action = _kill_action(candidate)
+        confirmations.request(update.callback_query.from_user.id, action)
         await _edit_or_reply(
             update,
             f"⚠️ <b>Завершить текущий процесс в фокусе?</b>\n<pre>{escape(describe_process(candidate))}</pre>",
-            confirm_menu(f"proc:kill:{candidate.pid}", "menu:processes"),
+            confirm_menu(action, "menu:processes"),
         )
         return
 
@@ -741,11 +754,12 @@ async def _handle_process(
         if candidate is None:
             await _edit_or_reply(update, "Процесс больше не найден в результатах поиска.", processes_menu())
             return
-        confirmations.request(update.callback_query.from_user.id, f"proc:kill:{pid}")
+        action = _kill_action(candidate)
+        confirmations.request(update.callback_query.from_user.id, action)
         await _edit_or_reply(
             update,
             f"⚠️ <b>Завершить процесс?</b>\n<pre>{escape(describe_process(candidate))}</pre>",
-            confirm_menu(f"proc:kill:{pid}", "menu:processes"),
+            confirm_menu(action, "menu:processes"),
         )
 
 
@@ -893,7 +907,7 @@ def build_application(config: AppConfig) -> Application:
     async def send_timed_screenshot(monitor_id: int) -> None:
         await app.bot.send_photo(
             chat_id=config.allowed_user_id,
-            photo=capture_screenshot_png(monitor_id),
+            photo=await asyncio.to_thread(capture_screenshot, monitor_id),
         )
 
     async def report_timer_failure(exc: Exception) -> None:
