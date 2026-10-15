@@ -38,8 +38,7 @@ def test_screenshot_reason_for_wrong_session() -> None:
         )
     )
 
-    assert reason is not None
-    assert "активной пользовательской сессии" in reason
+    assert reason == "screenshot.wrong_session"
 
 
 def test_screenshot_reason_for_locked_desktop() -> None:
@@ -56,5 +55,4 @@ def test_screenshot_reason_for_locked_desktop() -> None:
         )
     )
 
-    assert reason is not None
-    assert "рабочий стол недоступен" in reason
+    assert reason == "screenshot.locked"

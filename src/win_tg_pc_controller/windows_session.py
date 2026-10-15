@@ -145,16 +145,11 @@ def format_windows_session(info: WindowsSessionInfo) -> str:
 
 
 def screenshot_unavailable_reason(info: WindowsSessionInfo) -> str | None:
+    """Return the i18n message key explaining why screenshots can't work."""
     if not info.is_windows:
         return None
     if info.is_active_user_session is False:
-        return (
-            "бот запущен не в активной пользовательской сессии. "
-            "Используйте AutoLogon + install_user_autostart.bat, чтобы бот запускался после входа пользователя."
-        )
+        return "screenshot.wrong_session"
     if info.desktop_accessible is False:
-        return (
-            "рабочий стол недоступен. Обычно это значит, что Windows заблокирована, "
-            "открыт secure desktop/UAC или удаленный доступ переключил сессию."
-        )
+        return "screenshot.locked"
     return None

@@ -7,22 +7,18 @@ import pytest
 from telegram.error import InvalidToken, NetworkError
 
 import win_tg_pc_controller.bot as bot_module
+import win_tg_pc_controller.handlers.screenshots as screenshots_module
 from win_tg_pc_controller.apps import LaunchApp
 from win_tg_pc_controller.config import AppConfig
+from win_tg_pc_controller.handlers.apps import app_launch_menu, apps_menu
+from win_tg_pc_controller.handlers.common import edit_or_reply, home_only_menu, main_menu
+from win_tg_pc_controller.handlers.processes import kill_action, parse_kill_action
+from win_tg_pc_controller.handlers.screenshots import handle_screenshot, screenshot_menu
 from win_tg_pc_controller.processes import ProcessCandidate
-from win_tg_pc_controller.bot import (
-    _edit_or_reply,
-    _handle_screenshot,
-    _localized_markup,
-    app_launch_menu,
-    home_only_menu,
-    main_menu,
-    screenshot_menu,
-)
 
 
 def test_screenshot_home_button_is_localized() -> None:
-    menu = _localized_markup("en", home_only_menu())
+    menu = home_only_menu("en")
 
     button = menu.inline_keyboard[0][0]
     assert button.text == "\U0001f3e0 Main menu"
@@ -30,7 +26,7 @@ def test_screenshot_home_button_is_localized() -> None:
 
 
 def test_app_menu_has_localized_delete_button() -> None:
-    menu = _localized_markup("en", app_launch_menu("tool"))
+    menu = app_launch_menu("en", "tool")
 
     button = next(
         button
@@ -48,13 +44,11 @@ def test_app_menu_has_localized_delete_button() -> None:
 
 def test_screenshot_replaces_monitor_menu_with_home_button(monkeypatch) -> None:
     message = SimpleNamespace(chat_id=123, delete=AsyncMock())
-    query = SimpleNamespace(message=message)
-    update = SimpleNamespace()
+    update = SimpleNamespace(callback_query=SimpleNamespace(message=message))
     context = SimpleNamespace(bot=SimpleNamespace(send_photo=AsyncMock()))
-    monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
-    monkeypatch.setattr(bot_module, "capture_screenshot", lambda _monitor_id: b"png")
+    monkeypatch.setattr(screenshots_module, "capture_screenshot", lambda _monitor_id: b"png")
 
-    asyncio.run(_handle_screenshot(update, context, query, "1"))
+    asyncio.run(handle_screenshot(update, context, "en", "1"))
 
     arguments = context.bot.send_photo.await_args.kwargs
     assert arguments["chat_id"] == 123
@@ -67,27 +61,25 @@ def test_screenshot_replaces_monitor_menu_with_home_button(monkeypatch) -> None:
 
 def test_screenshot_capture_failure_keeps_monitor_menu(monkeypatch) -> None:
     message = SimpleNamespace(chat_id=123, delete=AsyncMock())
-    query = SimpleNamespace(message=message)
-    update = SimpleNamespace()
+    update = SimpleNamespace(callback_query=SimpleNamespace(message=message))
     context = SimpleNamespace(bot=SimpleNamespace(send_photo=AsyncMock()))
-    monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
     monkeypatch.setattr(
-        bot_module,
+        screenshots_module,
         "capture_screenshot",
         lambda _monitor_id: (_ for _ in ()).throw(RuntimeError("unavailable")),
     )
 
     with pytest.raises(RuntimeError, match="unavailable"):
-        asyncio.run(_handle_screenshot(update, context, query, "1"))
+        asyncio.run(handle_screenshot(update, context, "en", "1"))
 
     context.bot.send_photo.assert_not_awaited()
     message.delete.assert_not_awaited()
 
 
 def test_screenshot_menu_includes_auto_screenshot_button(monkeypatch) -> None:
-    monkeypatch.setattr(bot_module, "list_monitors", lambda: [])
+    monkeypatch.setattr(screenshots_module, "list_monitors", lambda: [])
 
-    menu = screenshot_menu()
+    menu = screenshot_menu("en")
 
     assert any(
         button.callback_data == "timer:menu"
@@ -96,7 +88,7 @@ def test_screenshot_menu_includes_auto_screenshot_button(monkeypatch) -> None:
     )
     assert all(
         button.callback_data != "timer:menu"
-        for row in main_menu().inline_keyboard
+        for row in main_menu("en").inline_keyboard
         for button in row
     )
 
@@ -109,10 +101,9 @@ def test_notify_online_sends_localized_startup_message(monkeypatch, tmp_path) ->
         user_settings_file=tmp_path / "user_settings.json",
     )
     application = SimpleNamespace(
-        bot_data={"config": config},
+        bot_data={"config": config, "language_store": SimpleNamespace(get=lambda _user_id: "en")},
         bot=SimpleNamespace(send_message=AsyncMock()),
     )
-    monkeypatch.setattr(bot_module, "_stored_language", lambda _user_id: "en")
 
     asyncio.run(bot_module.notify_online(application))
 
@@ -165,9 +156,8 @@ def test_main_menu_callback_from_photo_replies_with_new_message(monkeypatch) -> 
         callback_query=SimpleNamespace(message=message),
         effective_message=message,
     )
-    monkeypatch.setattr(bot_module, "_language", lambda _update: "en")
 
-    asyncio.run(_edit_or_reply(update, "Main", home_only_menu()))
+    asyncio.run(edit_or_reply(update, "Main", home_only_menu("en")))
 
     message.reply_text.assert_awaited_once()
     message.edit_text.assert_not_awaited()
@@ -253,7 +243,7 @@ def test_apps_menu_marks_missing_app(tmp_path) -> None:
         "gone": LaunchApp("gone", "Gone", tmp_path / "gone.exe"),
     }
 
-    menu = bot_module.apps_menu(apps)
+    menu = apps_menu("en", apps)
 
     assert menu.inline_keyboard[0][0].text == "🚀 Tool"
     assert menu.inline_keyboard[1][0].text == "⚠️ Gone"
@@ -280,13 +270,13 @@ def test_setup_logging_writes_to_file(tmp_path) -> None:
 def test_kill_action_round_trips_process_identity() -> None:
     candidate = ProcessCandidate(pid=4321, name="tool.exe", exe="", cmdline="", create_time=1712345678.123456)
 
-    action = bot_module._kill_action(candidate)
+    action = kill_action(candidate)
 
     assert len(f"confirm:{action}".encode()) <= 64
-    assert bot_module._parse_kill_action(action) == (4321, 1712345678.123456)
+    assert parse_kill_action(action) == (4321, 1712345678.123456)
 
 
 def test_kill_action_without_create_time() -> None:
     candidate = ProcessCandidate(pid=4321, name="tool.exe", exe="", cmdline="")
 
-    assert bot_module._parse_kill_action(bot_module._kill_action(candidate)) == (4321, None)
+    assert parse_kill_action(kill_action(candidate)) == (4321, None)

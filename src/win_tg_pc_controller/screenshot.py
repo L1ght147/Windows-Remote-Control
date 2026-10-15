@@ -6,6 +6,7 @@ from io import BytesIO
 import mss
 from PIL import Image
 
+from .i18n import LocalizedError
 from .windows_session import collect_windows_session_info, screenshot_unavailable_reason
 
 
@@ -43,7 +44,7 @@ def list_monitors() -> list[MonitorInfo]:
                 )
             return monitors
     except Exception as exc:
-        raise RuntimeError(f"скриншоты недоступны: {exc}") from exc
+        raise LocalizedError("screenshot.unavailable", error=exc) from exc
 
 
 def _resized(image: Image.Image, scale: float) -> Image.Image:
@@ -87,7 +88,7 @@ def capture_screenshot(monitor_id: int = 0) -> BytesIO:
     info = collect_windows_session_info()
     reason = screenshot_unavailable_reason(info)
     if reason is not None:
-        raise RuntimeError(f"скриншот недоступен: {reason}")
+        raise LocalizedError(reason)
 
     try:
         with mss.mss() as screen:
@@ -99,9 +100,5 @@ def capture_screenshot(monitor_id: int = 0) -> BytesIO:
     except ValueError:
         raise
     except Exception as exc:
-        raise RuntimeError(
-            "скриншот недоступен: Windows не отдала изображение рабочего стола. "
-            "Проверьте, что бот запущен в пользовательской сессии, рабочий стол не заблокирован "
-            f"и нет активного UAC/secure desktop. Техническая причина: {exc}"
-        ) from exc
+        raise LocalizedError("screenshot.capture_failed", error=exc) from exc
     return encode_for_telegram(image, f"screenshot-monitor-{monitor_id}")
