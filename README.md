@@ -158,6 +158,13 @@ After the bot starts successfully, it sends the allowed Telegram user a short
 online notification. This confirms the bot has started; it can also appear
 after a manual bot-process restart, not only after Windows starts.
 
+If the network isn't ready yet after logon, the bot keeps retrying the
+connection to Telegram instead of exiting.
+
+The bot writes its log to `logs\bot.log` in the project directory, rotated at
+about 1 MB with three older files kept. Check it when the bot doesn't come
+online after autostart.
+
 Remove the scheduled task with:
 
 ```bat
@@ -195,8 +202,8 @@ UAC prompt in the current remote session.
   `5` to `300`.
 - `telegram_timeout_seconds`: Telegram API timeout in seconds. Valid range:
   `5` to `300`.
-- `telegram_bootstrap_retries`: startup retry count for Telegram polling. Use
-  `-1` to retry indefinitely.
+- `telegram_bootstrap_retries`: startup retry count for connecting to Telegram
+  and starting polling. Use `-1` to retry indefinitely.
 
 `apps.json` must contain an array of application entries:
 
@@ -217,6 +224,11 @@ Each entry must include:
 - `path`: existing path to an `.exe`, `.bat`, or `.lnk` file.
 
 Entries must have unique IDs and case-insensitive unique titles.
+
+If a file listed in `apps.json` no longer exists, the bot still starts and
+marks the entry with ⚠️ in the menu; launching it reports an error. If
+`apps.json` itself is invalid, the bot starts with an empty list, logs the
+error, and doesn't overwrite the file until you fix it.
 
 ## Troubleshooting
 

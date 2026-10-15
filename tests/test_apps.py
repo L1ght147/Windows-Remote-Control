@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -80,3 +81,40 @@ def test_admin_launch_is_windows_only(tmp_path: Path, monkeypatch: pytest.Monkey
 
     with pytest.raises(RuntimeError, match="admin launch is only supported on Windows"):
         run_app(app, as_admin=True)
+
+
+def test_load_apps_keeps_entry_with_missing_path(tmp_path: Path) -> None:
+    apps_path = tmp_path / "apps.json"
+    missing_path = tmp_path / "missing.exe"
+    apps_path.write_text(
+        json.dumps([{"id": "missing", "title": "Missing", "path": str(missing_path)}]),
+        encoding="utf-8",
+    )
+
+    apps = load_apps(apps_path)
+
+    assert apps["missing"].path == missing_path
+
+
+def test_add_app_preserves_entry_with_missing_path(tmp_path: Path) -> None:
+    first_path = tmp_path / "first.exe"
+    second_path = tmp_path / "second.exe"
+    first_path.write_bytes(b"")
+    second_path.write_bytes(b"")
+    apps_path = tmp_path / "apps.json"
+    first = add_app(apps_path, "First", str(first_path))
+    first_path.unlink()
+
+    add_app(apps_path, "Second", str(second_path))
+
+    assert load_apps(apps_path)[first.id] == first
+
+
+def test_run_app_rejects_missing_file(tmp_path: Path) -> None:
+    app = _validate_app(
+        {"id": "missing", "title": "Missing", "path": str(tmp_path / "missing.exe")},
+        require_exists=False,
+    )
+
+    with pytest.raises(RuntimeError, match="app file not found"):
+        run_app(app)

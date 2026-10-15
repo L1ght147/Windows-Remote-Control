@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from html import escape
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -33,6 +36,11 @@ LOGGER = logging.getLogger(__name__)
 INPUT_STATE_KEY = "input_state"
 PROCESS_RESULTS_KEY = "process_results"
 SCREENSHOT_TIMER_KEY = "screenshot_timer"
+STARTUP_RETRY_INITIAL_DELAY_SECONDS = 5.0
+STARTUP_RETRY_MAX_DELAY_SECONDS = 60.0
+LOG_FILE = Path("logs") / "bot.log"
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUP_COUNT = 3
 LANGUAGE_STORE: LanguageStore | None = None
 
 
@@ -151,7 +159,10 @@ def screenshot_timer_monitor_menu() -> InlineKeyboardMarkup:
 
 
 def apps_menu(apps: dict[str, LaunchApp]) -> InlineKeyboardMarkup:
-    rows = [[_button(f"🚀 {app.title}", f"app:run:{app.id}")] for app in apps.values()]
+    rows = [
+        [_button(f"{'🚀' if app.path.exists() else '⚠️'} {app.title}", f"app:run:{app.id}")]
+        for app in apps.values()
+    ]
     rows.append([_button("➕ Добавить", "app:add")])
     rows.append([_button("⬅️ Назад", "menu:main")])
     return InlineKeyboardMarkup(rows)
@@ -792,6 +803,27 @@ async def notify_online(application: Application) -> None:
     )
 
 
+async def initialize_with_retries(application: Application, retries: int) -> None:
+    delay = STARTUP_RETRY_INITIAL_DELAY_SECONDS
+    attempt = 0
+    while True:
+        try:
+            await application.initialize()
+            return
+        except NetworkError as exc:
+            attempt += 1
+            if retries != -1 and attempt > retries:
+                raise
+            LOGGER.warning(
+                "Telegram API is unreachable during startup (attempt %s), retrying in %.0f s: %s",
+                attempt,
+                delay,
+                exc,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, STARTUP_RETRY_MAX_DELAY_SECONDS)
+
+
 async def start_polling(application: Application, config: AppConfig) -> None:
     if application.updater is None:
         raise RuntimeError("Telegram updater is not configured")
@@ -799,7 +831,7 @@ async def start_polling(application: Application, config: AppConfig) -> None:
     def error_callback(exc: TelegramError) -> None:
         application.create_task(application.process_error(error=exc, update=None))
 
-    await application.initialize()
+    await initialize_with_retries(application, config.telegram_bootstrap_retries)
     await application.updater.start_polling(
         allowed_updates=Update.ALL_TYPES,
         bootstrap_retries=config.telegram_bootstrap_retries,
@@ -807,7 +839,10 @@ async def start_polling(application: Application, config: AppConfig) -> None:
         error_callback=error_callback,
     )
     await application.start()
-    await notify_online(application)
+    try:
+        await notify_online(application)
+    except TelegramError as exc:
+        LOGGER.warning("Failed to send startup notification: %s", exc)
 
 
 async def run_polling(application: Application, config: AppConfig) -> None:
@@ -825,8 +860,20 @@ async def run_polling(application: Application, config: AppConfig) -> None:
         await application.shutdown()
 
 
+def _load_apps_for_startup(config: AppConfig) -> dict[str, LaunchApp]:
+    try:
+        return load_apps(config.apps_file)
+    except (OSError, ValueError):
+        LOGGER.exception(
+            "Failed to load %s, starting with an empty application list. "
+            "Fix the file; it is not overwritten until then.",
+            config.apps_file,
+        )
+        return {}
+
+
 def build_application(config: AppConfig) -> Application:
-    apps = load_apps(config.apps_file)
+    apps = _load_apps_for_startup(config)
     app = (
         Application.builder()
         .token(config.telegram_bot_token)
@@ -866,15 +913,37 @@ def build_application(config: AppConfig) -> Application:
     return app
 
 
-def run() -> None:
+def setup_logging(log_file: Path = LOG_FILE) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [
+        RotatingFileHandler(
+            log_file,
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+    ]
+    # pythonw.exe (autostart) has no console: sys.stderr is None there.
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler())
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    config = load_config()
-    app = build_application(config)
+
+
+def run() -> None:
+    setup_logging()
+    try:
+        config = load_config()
+        app = build_application(config)
+    except Exception:
+        LOGGER.exception("Failed to start Windows Telegram PC Controller")
+        raise
     LOGGER.info("Starting Windows Telegram PC Controller")
     try:
         asyncio.run(run_polling(app, config))
@@ -889,4 +958,7 @@ def run() -> None:
             "Telegram network error. Check internet access to https://api.telegram.org, "
             "VPN/proxy/firewall settings, and TELEGRAM_BOT_TOKEN."
         )
+        raise
+    except Exception:
+        LOGGER.exception("Windows Telegram PC Controller stopped with an error")
         raise

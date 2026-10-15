@@ -25,7 +25,7 @@ def make_app_id(title: str) -> str:
     return normalized[:32] or "app"
 
 
-def _validate_app(raw: object) -> LaunchApp:
+def _validate_app(raw: object, require_exists: bool = True) -> LaunchApp:
     if not isinstance(raw, dict):
         raise ValueError("Each app must be an object")
 
@@ -43,7 +43,7 @@ def _validate_app(raw: object) -> LaunchApp:
     path = Path(app_path.strip()).expanduser()
     if path.suffix.lower() not in ALLOWED_APP_EXTENSIONS:
         raise ValueError(f"App {app_id} must be .exe, .bat, or .lnk")
-    if not path.exists():
+    if require_exists and not path.exists():
         raise ValueError(f"App {app_id} path does not exist")
 
     return LaunchApp(id=app_id, title=title.strip(), path=path)
@@ -60,7 +60,9 @@ def load_apps(path: Path) -> dict[str, LaunchApp]:
     apps: dict[str, LaunchApp] = {}
     seen_titles: set[str] = set()
     for item in raw:
-        app = _validate_app(item)
+        # A missing file (uninstalled app, unplugged drive) must not prevent the
+        # bot from starting or the list from being edited; it fails at launch.
+        app = _validate_app(item, require_exists=False)
         title_key = app.title.casefold()
         if app.id in apps:
             raise ValueError(f"Duplicate app id: {app.id}")
@@ -119,6 +121,8 @@ def _run_app_as_admin(app: LaunchApp) -> None:
 
 
 def run_app(app: LaunchApp, as_admin: bool = False) -> None:
+    if not app.path.exists():
+        raise RuntimeError(f"app file not found: {app.path}")
     if as_admin:
         _run_app_as_admin(app)
         return
